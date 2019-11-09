@@ -10,9 +10,9 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     description='MongoDB plugin for Intake',
-    url='https://github.com/ContinuumIO/intake-mongo',
-    maintainer='Stan Seibert',
-    maintainer_email='sseibert@anaconda.com',
+    url='https://github.com/jmosbacher/intake-mongo',
+    maintainer='Yossi Mosbacher',
+    maintainer_email='joe.mosbacher@gmail.com',
     license='BSD',
     packages=find_packages(),
     package_data={'': ['*.csv', '*.yml', '*.html']},
@@ -20,4 +20,10 @@ setup(
     install_requires=requires,
     long_description=open('README.rst').read(),
     zip_safe=False,
+    entry_points={
+        'intake.drivers': [
+            'mongodf = intake_mongo.intake_mongo:MongoDataFrameSource',
+            'mongo = intake_mongo.intake_mongo:MongoDictSource',
+        ]
+    },
 )

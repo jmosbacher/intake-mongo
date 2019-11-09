@@ -6,15 +6,15 @@ Quickstart
 
 .. _MongoDB: https://www.mongodb.com/
 
-This plugin reads MongoDB collections without random access: there is only ever
-a single partition.
+This plugin reads MongoDB collections with custom sized partioning.
 
 Installation
 ------------
 
 To use this plugin for `intake`_, install with the following command::
 
-   conda install -c intake intake-mongo
+   git clone https://github.com/jmosbacher/intake-mongo.git
+   python setup.py develop
 
 .. _intake: https://github.com/ContinuumIO/intake
 
@@ -24,9 +24,9 @@ Usage
 Ad-hoc
 ~~~~~~
 
-After installation, the function ``intake.open_mongo``
-will become available. It can be used to fetch a collection from the MongoDB
-server, and download the results as a list of dictionaries.
+After installation, the functions ``intake.open_mongo`` and ``intake.open_mongodf``
+will become available. They can be used to fetch a collection from the MongoDB
+server, and download the results as a list of dictionaries (mongo) or a pandas dataframe (mongodf).
 
 The parameters are of interest when defining a data source:
 
@@ -70,6 +70,7 @@ A full entry might look like::
           collection: mycollection
           connect_kwargs: {"ssl": true}
           find_kwargs: {'projection': ['field1', 'field2]}
+          chunksize: 10
           _id: false
 
 In this case, we specify a connection to the local machine, connect with SSL activated,

@@ -8,16 +8,34 @@ from intake.source import base
 from . import __version__
 
 
-class MongoDBSource(base.DataSource):
+def flatten_nested_dict(d):
+    flat = {}
+    for k0, v0 in d.items():
+        if isinstance(v0, dict):
+            for k1, v1 in flatten_nested_dict(v0).items():
+                flat[(k0,) + k1] = v1
+        else:
+            flat[(k0,)] = v0
+    return flat
+    
+def dicts_to_table(ds):
+    N = len(ds)
+    table = defaultdict(lambda:[float("nan")]*N)
+    flat_ds = [flatten_nested_dict(d) for d in ds]
+    for i,d in enumerate(flat_ds):
+        for k,v in d.items():
+            table[k][i] = v
+    return table
+    
+class MongoDictSource(base.DataSource):
     name = 'mongo'
     container = 'python'
-    partition_access = False
+    partition_access = True
     version = __version__
 
     def __init__(self, uri, db, collection, connect_kwargs=None,
-                 find_kwargs=None, _id=False, metadata=None):
+                 find_kwargs=None, _id=False, metadata=None, chunksize=100):
         """Load data from MongoDB
-
         Parameters
         ----------
         uri: str
@@ -42,31 +60,17 @@ class MongoDBSource(base.DataSource):
             If False, remove default "_id" field from output
         metadata: dict
             The metadata to keep
+        chunksize: int
+            The number of documents to return for each partition
         """
-        super(MongoDBSource, self).__init__(metadata=metadata)
+        super().__init__(metadata=metadata)
         self._uri = uri
         self._db = db
         self._collection = collection
         self._connect_kwargs = connect_kwargs or {}
-        self._find_kwargs = find_kwargs or {}
         self._id = _id
-        self.collection = None
-
-    def _get_schema(self):
-        import pymongo
-        if self.collection is None:
-            mongo = pymongo.MongoClient(self._uri, **self._connect_kwargs)
-            self.collection = mongo[self._db][self._collection]
-
-        return base.Schema(datashape=None,
-                           dtype=None,
-                           shape=None,
-                           npartitions=1,  # consider only one partition
-                           extra_metadata={})
-
-    def _get_partition(self, _):
-        self._get_schema()
-        kw = self._find_kwargs.copy()
+        self._chunksize = chunksize
+        kw = find_kwargs or {}
         if self._id is False:
             # https://stackoverflow.com/a/12345646/3821154
             if 'projection' in kw:
@@ -77,7 +81,66 @@ class MongoDBSource(base.DataSource):
             else:
                 pro = {'_id': False}
             kw['projection'] = pro
-        return list(self.collection.find(**kw))
+            kw["filter"] = kw.get("filter", {})
+        self._find_kwargs = kw
+        self.collection = None
+
+    def post_process(self, data):
+        return list(data)
+
+    def _get_schema(self):
+        if self.collection is None:
+            import pymongo
+            self.client = pymongo.MongoClient(self._uri, **self._connect_kwargs)
+            self.collection = self.client[self._db][self._collection]
+        ndocs = self.collection.count_documents({})
+        if ndocs<self._chunksize:
+            self._chunksize = ndocs
+        part0 = self.read_partition(0)[0]
+        ncols = len(part0.keys())
+        npart = int(math.ceil(ndocs/self._chunksize))
+        return base.Schema(datashape=None,
+                           dtype=None,
+                           shape=(ndocs,ncols),
+                           npartitions=npart,
+                           extra_metadata={})
+
+    def _get_partition(self, i):
+        self._load_metadata()
+        start = i*self._chunksize
+        data = self.post_process(self.collection.find(**self._find_kwargs)[start:start+self._chunksize])
+        return data
+
+    def read(self):
+        self._load_metadata()
+        data = self.post_process(self.collection.find(**self._find_kwargs))
+        return data
 
     def _close(self):
+        if self.client:
+            self.client.close()
+            self.client = None
         self.collection = None
+
+class MongoDataFrameSource(MongoDictSource):
+    name = 'mongodf'
+    container = 'dataframe'
+    partition_access = True
+    version = __version__
+
+    def post_process(self, data):
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("Must have pandas installed to use {} plugin".format(self.name))
+        data = super().post_process(data)
+        table = dicts_to_table(data)
+        return pd.DataFrame(table)
+
+    def to_dask(self):
+        try:
+            import dask.dataframe as dd
+        except ImportError:
+            raise ImportError("Must have dask installed to use this method")
+        df = self.read()
+        return dd.from_pandas(df, chunksize=self._chunksize)
