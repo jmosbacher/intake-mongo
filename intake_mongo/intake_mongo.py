@@ -7,7 +7,7 @@ from intake.source import base
 from intake.source.base import DataSource
 from collections import defaultdict
 import math
-from .. import __version__
+from . import __version__
 
 
 class MongoSource(DataSource):
