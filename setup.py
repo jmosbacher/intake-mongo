@@ -23,7 +23,7 @@ setup(
     entry_points={
         'intake.drivers': [
             'mongodf = intake_mongo.intake_mongo:MongoDataFrameSource',
-            'mongo = intake_mongo.intake_mongo:MongoDictSource',
+            'mongo = intake_mongo.intake_mongo:MongoSource',
         ]
     },
 )

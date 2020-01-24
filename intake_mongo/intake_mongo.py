@@ -3,31 +3,14 @@ try:
     import urllib.parse as urlparse
 except ImportError:
     import urlparse
-
 from intake.source import base
-from . import __version__
+from intake.source.base import DataSource
+from collections import defaultdict
+import math
+from .. import __version__
 
 
-def flatten_nested_dict(d):
-    flat = {}
-    for k0, v0 in d.items():
-        if isinstance(v0, dict):
-            for k1, v1 in flatten_nested_dict(v0).items():
-                flat[(k0,) + k1] = v1
-        else:
-            flat[(k0,)] = v0
-    return flat
-    
-def dicts_to_table(ds):
-    N = len(ds)
-    table = defaultdict(lambda:[float("nan")]*N)
-    flat_ds = [flatten_nested_dict(d) for d in ds]
-    for i,d in enumerate(flat_ds):
-        for k,v in d.items():
-            table[k][i] = v
-    return table
-    
-class MongoDictSource(base.DataSource):
+class MongoSource(DataSource):
     name = 'mongo'
     container = 'python'
     partition_access = True
@@ -94,9 +77,15 @@ class MongoDictSource(base.DataSource):
             self.client = pymongo.MongoClient(self._uri, **self._connect_kwargs)
             self.collection = self.client[self._db][self._collection]
         ndocs = self.collection.count_documents({})
+        if not ndocs:
+            return base.Schema(datashape=None,
+                           dtype=None,
+                           shape=None,
+                           npartitions=1,
+                           extra_metadata={})
         if ndocs<self._chunksize:
             self._chunksize = ndocs
-        part0 = self.read_partition(0)[0]
+        part0 = self.post_process(self.collection.find(**self._find_kwargs))[:self._chunksize]
         ncols = len(part0.keys())
         npart = int(math.ceil(ndocs/self._chunksize))
         return base.Schema(datashape=None,
@@ -122,11 +111,19 @@ class MongoDictSource(base.DataSource):
             self.client = None
         self.collection = None
 
-class MongoDataFrameSource(MongoDictSource):
+class MongoDataFrameSource(MongoSource):
     name = 'mongodf'
     container = 'dataframe'
     partition_access = True
     version = __version__
+
+    def __init__(self, uri, db, collection, connect_kwargs=None, find_kwargs=None, 
+                    _id=False, metadata=None, chunksize=100, normalize_kwargs={}):
+
+        self.normalize_kwargs = normalize_kwargs
+
+        super().__init__(uri, db, collection, connect_kwargs=connect_kwargs,
+                        find_kwargs=find_kwargs, _id=_id, metadata=metadata, chunksize=chunksize)
 
     def post_process(self, data):
         try:
@@ -134,7 +131,7 @@ class MongoDataFrameSource(MongoDictSource):
         except ImportError:
             raise ImportError("Must have pandas installed to use {} plugin".format(self.name))
         data = super().post_process(data)
-        table = dicts_to_table(data)
+        table = pd.io.json.json_normalize(data, **self.normalize_kwargs)
         return pd.DataFrame(table)
 
     def to_dask(self):
