@@ -80,7 +80,7 @@ class MongoSource(DataSource):
         if not ndocs:
             return base.Schema(datashape=None,
                            dtype=None,
-                           shape=None,
+                           shape=(),
                            npartitions=1,
                            extra_metadata={})
         if ndocs<self._chunksize:
